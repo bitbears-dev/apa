@@ -26,9 +26,19 @@ pub fn print_plan(plan: &Plan) {
     }
 
     println!("\n{}:", "Command".bold());
+    
+    let full_cmd = plan.aws_cli_args.join(" ");
+    let mut actual_args = shell_words::split(&full_cmd)
+        .unwrap_or_else(|_| plan.aws_cli_args.clone());
+
+    if actual_args.first().map(String::as_str) == Some("aws") {
+        actual_args.remove(0);
+    }
+
     let mut args_clone = vec!["aws".to_string()];
-    args_clone.extend(plan.aws_cli_args.clone());
-    println!("  {}", args_clone.join(" ").bright_white());
+    args_clone.extend(actual_args);
+    
+    println!("  {}", shell_words::join(args_clone).bright_white());
 
     if !plan.assumptions.is_empty() {
         println!("\n{}:", "Assumptions / Warnings".yellow().bold());

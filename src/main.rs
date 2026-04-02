@@ -9,12 +9,13 @@ use crate::config::AppConfig;
 use crate::context::AwsContext;
 use crate::executor::{Executor, PolicyEngine};
 use crate::history::{HistoryManager, HistoryRecord};
-use crate::planner::Planner;
+use crate::planner::{Planner, RiskLevel};
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use clap::{Parser, Subcommand};
 use colored::*;
+use dialoguer::{FuzzySelect, Select, theme::ColorfulTheme};
 use tracing::{debug, info};
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -96,7 +97,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Load components
     let app_config = AppConfig::load();
-    let aws_context = AwsContext::detect();
+    let mut aws_context = AwsContext::detect();
 
     debug!(
         "Loaded Config (API key presence: {})",
@@ -185,17 +186,63 @@ async fn main() -> anyhow::Result<()> {
                         ui::print_plan(&plan);
 
                         let mut exit_code = None;
-                        if PolicyEngine::validate_and_confirm(&plan).unwrap_or(false) {
-                            match Executor::run(&plan, &aws_context.profile, &aws_context.region) {
-                                Ok(code) => {
-                                    exit_code = code;
-                                }
-                                Err(e) => {
-                                    println!("{}", format!("Execution failed: {}", e).red());
+                        if PolicyEngine::validate(&plan).unwrap_or(false) {
+                            loop {
+                                let default_sel = if plan.risk_level == RiskLevel::Low { 0 } else { 2 };
+                                let items = vec!["Execute command", "Change AWS Profile / Region", "Cancel execution"];
+                                
+                                println!();
+                                let selection = Select::with_theme(&ColorfulTheme::default())
+                                    .with_prompt("What do you want to do?")
+                                    .default(default_sel)
+                                    .items(&items)
+                                    .interact()
+                                    .unwrap_or(2);
+
+                                match selection {
+                                    0 => { // Execute
+                                        match Executor::run(&plan, &aws_context.profile, &aws_context.region) {
+                                            Ok(code) => {
+                                                exit_code = code;
+                                            }
+                                            Err(e) => {
+                                                println!("{}", format!("Execution failed: {}", e).red());
+                                            }
+                                        }
+                                        break;
+                                    }
+                                    1 => { // Change Context
+                                        let profiles = AwsContext::list_profiles();
+                                        if let Ok(idx) = FuzzySelect::with_theme(&ColorfulTheme::default())
+                                            .with_prompt("Select AWS Profile")
+                                            .default(profiles.iter().position(|r| r == &aws_context.profile).unwrap_or(0))
+                                            .items(&profiles)
+                                            .interact()
+                                        {
+                                            aws_context.profile = profiles[idx].clone();
+                                        }
+
+                                        let regions = AwsContext::list_regions();
+                                        if let Ok(idx) = FuzzySelect::with_theme(&ColorfulTheme::default())
+                                            .with_prompt("Select AWS Region")
+                                            .default(regions.iter().position(|r| r == &aws_context.region).unwrap_or(0))
+                                            .items(&regions)
+                                            .interact()
+                                        {
+                                            aws_context.region = regions[idx].clone();
+                                        }
+                                        
+                                        println!("{}", format!("Context updated: Profile='{}', Region='{}'", aws_context.profile, aws_context.region).green());
+                                    }
+                                    _ => { // Cancel
+                                        println!("{}", "Execution cancelled by user.".yellow());
+                                        exit_code = Some(130);
+                                        break;
+                                    }
                                 }
                             }
                         } else {
-                            println!("{}", "Execution cancelled by policy or user.".yellow());
+                            println!("{}", "Execution cancelled by policy.".yellow());
                             exit_code = Some(130);
                         }
 

@@ -63,6 +63,7 @@ Constraints:
    For read-only operations, set it to `low`.
 4. If the user's intent lacks essential parameters (e.g. required resource IDs/names for the command), DO NOT use placeholders like `<xyz>` in `aws_cli_args`. Instead, securely list them in `missing_parameters` with a clear `name` and `description` so the user can be prompted.
 5. NEVER include shell pipes (|), redirects (>), or logical operators (&&, ||) in `aws_cli_args`. 
+6. `aws_cli_args` MUST contain each argument as a uniquely separate string element (e.g., `["dynamodb", "describe-table", "--table-name", "Hoge"]`). DO NOT combine multiple arguments into a single string (e.g., DO NOT output `["dynamodb describe-table"]`).
 "#
         );
 

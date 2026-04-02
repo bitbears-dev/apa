@@ -1,13 +1,12 @@
 use crate::planner::{Plan, RiskLevel};
 use anyhow::Result;
 use colored::*;
-use dialoguer::Confirm;
 use std::process::{Command, Stdio};
 
 pub struct PolicyEngine;
 
 impl PolicyEngine {
-    pub fn validate_and_confirm(plan: &Plan) -> Result<bool> {
+    pub fn validate(plan: &Plan) -> Result<bool> {
         // ガードレール定義
         let illegal_chars = ['|', '>', '<', '&', ';', '`', '$'];
         for arg in &plan.aws_cli_args {
@@ -22,18 +21,7 @@ impl PolicyEngine {
             return Ok(false);
         }
 
-        let default_confirm = plan.risk_level == RiskLevel::Low;
-
-        println!();
-        if Confirm::new()
-            .with_prompt("Execute this command?")
-            .default(default_confirm)
-            .interact()?
-        {
-            Ok(true)
-        } else {
-            Ok(false)
-        }
+        Ok(true)
     }
 }
 
@@ -41,8 +29,16 @@ pub struct Executor;
 
 impl Executor {
     pub fn run(plan: &Plan, profile: &str, region: &str) -> Result<Option<i32>> {
+        let full_cmd = plan.aws_cli_args.join(" ");
+        let mut actual_args = shell_words::split(&full_cmd)
+            .unwrap_or_else(|_| plan.aws_cli_args.clone());
+
+        if actual_args.first().map(|s| s.as_str()) == Some("aws") {
+            actual_args.remove(0);
+        }
+
         let mut cmd = Command::new("aws");
-        cmd.args(&plan.aws_cli_args);
+        cmd.args(&actual_args);
 
         cmd.env("AWS_PROFILE", profile);
         cmd.env("AWS_REGION", region);
@@ -50,7 +46,7 @@ impl Executor {
         cmd.stdout(Stdio::inherit());
         cmd.stderr(Stdio::inherit());
 
-        println!("{}", "Executing...".cyan());
+        println!("{}", format!("Executing: aws {} (with AWS_PROFILE={} AWS_REGION={})", shell_words::join(actual_args).as_str(), profile, region).cyan());
         let mut child = cmd.spawn()?;
         let status = child.wait()?;
 
