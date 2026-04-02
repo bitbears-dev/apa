@@ -18,6 +18,43 @@ use colored::*;
 use tracing::{debug, info};
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
+async fn generate_plan_interactively(
+    planner: &Planner,
+    original_prompt: &str,
+    profile: &str,
+    region: &str,
+) -> anyhow::Result<(crate::planner::Plan, String)> {
+    let mut current_prompt = original_prompt.to_string();
+    loop {
+        let plan = planner
+            .generate_plan(&current_prompt, profile, region)
+            .await?;
+
+        let mut missing_found = false;
+        if let Some(ref missing) = plan.missing_parameters
+            && !missing.is_empty()
+        {
+            missing_found = true;
+            println!("\n{}", "Required information is missing:".yellow().bold());
+            let mut added_info = String::new();
+            for param in missing {
+                let input: String = dialoguer::Input::new()
+                    .with_prompt(format!("{} ({})", param.name.cyan(), param.description))
+                    .interact_text()
+                    .expect("Failed to read input");
+
+                added_info.push_str(&format!("- {}: {}\n", param.name, input));
+            }
+            current_prompt.push_str("\n\nUser provided the following missing information:\n");
+            current_prompt.push_str(&added_info);
+        }
+
+        if !missing_found {
+            return Ok((plan, current_prompt));
+        }
+    }
+}
+
 #[derive(Parser, Debug)]
 #[command(name = "apa", version, about = "APA: AI Powered AWS CLI", long_about = None)]
 struct Cli {
@@ -79,11 +116,15 @@ async fn main() -> anyhow::Result<()> {
 
             if let Some(api_key) = &app_config.openai_api_key {
                 let planner = Planner::new(api_key.clone());
-                match planner
-                    .generate_plan(&prompt_text, &aws_context.profile, &aws_context.region)
-                    .await
+                match generate_plan_interactively(
+                    &planner,
+                    &prompt_text,
+                    &aws_context.profile,
+                    &aws_context.region,
+                )
+                .await
                 {
-                    Ok(plan) => {
+                    Ok((plan, final_prompt)) => {
                         ui::print_plan(&plan);
                         let _ = history_mgr.append(&HistoryRecord {
                             timestamp: SystemTime::now()
@@ -91,13 +132,13 @@ async fn main() -> anyhow::Result<()> {
                                 .unwrap()
                                 .as_secs()
                                 .to_string(),
-                            prompt: prompt_text,
+                            prompt: final_prompt,
                             plan: Some(plan),
                             exit_code: None,
                         });
                     }
                     Err(e) => {
-                        println!("Failed to generate plan: {}", e);
+                        println!("{}", format!("Failed to generate plan: {}", e).red());
                     }
                 }
             } else {
@@ -132,11 +173,15 @@ async fn main() -> anyhow::Result<()> {
 
             if let Some(api_key) = &app_config.openai_api_key {
                 let planner = Planner::new(api_key.clone());
-                match planner
-                    .generate_plan(&prompt_text, &aws_context.profile, &aws_context.region)
-                    .await
+                match generate_plan_interactively(
+                    &planner,
+                    &prompt_text,
+                    &aws_context.profile,
+                    &aws_context.region,
+                )
+                .await
                 {
-                    Ok(plan) => {
+                    Ok((plan, final_prompt)) => {
                         ui::print_plan(&plan);
 
                         let mut exit_code = None;
@@ -160,7 +205,7 @@ async fn main() -> anyhow::Result<()> {
                                 .unwrap()
                                 .as_secs()
                                 .to_string(),
-                            prompt: prompt_text.clone(),
+                            prompt: final_prompt,
                             plan: Some(plan),
                             exit_code,
                         });

@@ -11,11 +11,18 @@ pub enum RiskLevel {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct MissingParameter {
+    pub name: String,
+    pub description: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Plan {
     pub intent_summary: String,
     pub risk_level: RiskLevel,
     pub requires_confirmation: bool,
     pub aws_cli_args: Vec<String>,
+    pub missing_parameters: Option<Vec<MissingParameter>>,
     pub profile: Option<String>,
     pub region: Option<String>,
     pub assumptions: Vec<String>,
@@ -54,7 +61,7 @@ Constraints:
 3. For potentially destructive actions (delete, terminate, stop), set `risk_level` to `high`. 
    For write/update actions, set it to `medium`. 
    For read-only operations, set it to `low`.
-4. If the intent is unclear, make assumptions but warn the user in the `assumptions` array, and set risk_level to `medium` or `high`.
+4. If the user's intent lacks essential parameters (e.g. required resource IDs/names for the command), DO NOT use placeholders like `<xyz>` in `aws_cli_args`. Instead, securely list them in `missing_parameters` with a clear `name` and `description` so the user can be prompted.
 5. NEVER include shell pipes (|), redirects (>), or logical operators (&&, ||) in `aws_cli_args`. 
 "#
         );
@@ -73,6 +80,17 @@ Constraints:
                         "aws_cli_args": {
                             "type": "array",
                             "items": {"type": "string"}
+                        },
+                        "missing_parameters": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "name": {"type": "string"},
+                                    "description": {"type": "string"}
+                                },
+                                "required": ["name", "description"]
+                            }
                         },
                         "profile": {"type": "string"},
                         "region": {"type": "string"},
