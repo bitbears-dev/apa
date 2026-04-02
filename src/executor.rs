@@ -1,0 +1,59 @@
+use crate::planner::{Plan, RiskLevel};
+use anyhow::Result;
+use colored::*;
+use dialoguer::Confirm;
+use std::process::{Command, Stdio};
+
+pub struct PolicyEngine;
+
+impl PolicyEngine {
+    pub fn validate_and_confirm(plan: &Plan) -> Result<bool> {
+        // ガードレール定義
+        let illegal_chars = ['|', '>', '<', '&', ';', '`', '$'];
+        for arg in &plan.aws_cli_args {
+            if arg.contains(&illegal_chars[..]) {
+                println!("{}", "Error: Plan contains illegal shell characters.".red());
+                return Ok(false);
+            }
+        }
+
+        if plan.risk_level == RiskLevel::High {
+            println!("\n{}", "Policy Block: This high-risk destructive action cannot be executed autonomously in the MVP. Plan preview only.".red().bold());
+            return Ok(false);
+        }
+
+        let default_confirm = plan.risk_level == RiskLevel::Low;
+
+        println!();
+        if Confirm::new()
+            .with_prompt("Execute this command?")
+            .default(default_confirm)
+            .interact()?
+        {
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+}
+
+pub struct Executor;
+
+impl Executor {
+    pub fn run(plan: &Plan, profile: &str, region: &str) -> Result<Option<i32>> {
+        let mut cmd = Command::new("aws");
+        cmd.args(&plan.aws_cli_args);
+
+        cmd.env("AWS_PROFILE", profile);
+        cmd.env("AWS_REGION", region);
+
+        cmd.stdout(Stdio::inherit());
+        cmd.stderr(Stdio::inherit());
+
+        println!("{}", "Executing...".cyan());
+        let mut child = cmd.spawn()?;
+        let status = child.wait()?;
+
+        Ok(status.code())
+    }
+}
