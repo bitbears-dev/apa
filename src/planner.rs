@@ -14,6 +14,7 @@ pub enum RiskLevel {
 pub struct MissingParameter {
     pub name: String,
     pub description: String,
+    pub candidate_fetch_command: Option<Vec<String>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -62,6 +63,9 @@ Constraints:
    For write/update actions, set it to `medium`. 
    For read-only operations, set it to `low`.
 4. If the user's intent lacks essential parameters (e.g. required resource IDs/names for the command), DO NOT use placeholders like `<xyz>` in `aws_cli_args`. Instead, securely list them in `missing_parameters` with a clear `name` and `description` so the user can be prompted.
+   - If the missing parameter is an existing AWS resource (like an ID or Name), you MUST provide an AWS CLI command in `candidate_fetch_command` to list all possible choices dynamically for the user. Do not use this for arbitrary strings or tags.
+   - The fetch command MUST use `--query` and `--output text` to output a flat list separated by spaces or newlines. (Example: `["ec2", "describe-instances", "--query", "Reservations[].Instances[].InstanceId", "--output", "text"]`)
+   - If the missing parameter requires a complex format like a JSON structure (e.g. DynamoDB Keys, IAM Policies), you MUST include a concrete example of the expected format directly within the `description` field natively (e.g., 'Example: {{"pk": {{"S": "123"}}}}'). For DynamoDB specifically, remind the user to use the correct attribute types like `S` or `N`.
 5. NEVER include shell pipes (|), redirects (>), or logical operators (&&, ||) in `aws_cli_args`. 
 6. `aws_cli_args` MUST contain each argument as a uniquely separate string element (e.g., `["dynamodb", "describe-table", "--table-name", "Hoge"]`). DO NOT combine multiple arguments into a single string (e.g., DO NOT output `["dynamodb describe-table"]`).
 "#
@@ -88,7 +92,11 @@ Constraints:
                                 "type": "object",
                                 "properties": {
                                     "name": {"type": "string"},
-                                    "description": {"type": "string"}
+                                    "description": {"type": "string"},
+                                    "candidate_fetch_command": {
+                                        "type": "array",
+                                        "items": {"type": "string"}
+                                    }
                                 },
                                 "required": ["name", "description"]
                             }

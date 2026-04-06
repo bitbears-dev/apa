@@ -22,32 +22,99 @@ use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberI
 async fn generate_plan_interactively(
     planner: &Planner,
     original_prompt: &str,
-    profile: &str,
-    region: &str,
+    aws_context: &mut AwsContext,
 ) -> anyhow::Result<(crate::planner::Plan, String)> {
     let mut current_prompt = original_prompt.to_string();
     loop {
         let plan = planner
-            .generate_plan(&current_prompt, profile, region)
+            .generate_plan(&current_prompt, &aws_context.profile, &aws_context.region)
             .await?;
 
         let mut missing_found = false;
-        if let Some(ref missing) = plan.missing_parameters
-            && !missing.is_empty()
-        {
-            missing_found = true;
-            println!("\n{}", "Required information is missing:".yellow().bold());
-            let mut added_info = String::new();
-            for param in missing {
-                let input: String = dialoguer::Input::new()
-                    .with_prompt(format!("{} ({})", param.name.cyan(), param.description))
-                    .interact_text()
-                    .expect("Failed to read input");
+        if let Some(ref missing) = plan.missing_parameters {
+            if !missing.is_empty() {
+                missing_found = true;
+                println!("\n{}", "Required information is missing:".yellow().bold());
+                
+                let change_ctx = dialoguer::Confirm::new()
+                    .with_prompt(format!("Current Context: Profile='{}', Region='{}'. Change before fetching parameters?", aws_context.profile, aws_context.region))
+                    .default(false)
+                    .interact()?;
+                
+                if change_ctx {
+                    let profiles = AwsContext::list_profiles();
+                    if let Ok(idx) = dialoguer::FuzzySelect::with_theme(&dialoguer::theme::ColorfulTheme::default())
+                        .with_prompt("Select AWS Profile")
+                        .default(profiles.iter().position(|r| r == &aws_context.profile).unwrap_or(0))
+                        .items(&profiles)
+                        .interact()
+                    {
+                        aws_context.profile = profiles[idx].clone();
+                    }
 
-                added_info.push_str(&format!("- {}: {}\n", param.name, input));
+                    let regions = AwsContext::list_regions();
+                    if let Ok(idx) = dialoguer::FuzzySelect::with_theme(&dialoguer::theme::ColorfulTheme::default())
+                        .with_prompt("Select AWS Region")
+                        .default(regions.iter().position(|r| r == &aws_context.region).unwrap_or(0))
+                        .items(&regions)
+                        .interact()
+                    {
+                        aws_context.region = regions[idx].clone();
+                    }
+                    println!("{}", format!("Context updated: Profile='{}', Region='{}'", aws_context.profile, aws_context.region).green());
+                }
+
+                let mut added_info = String::new();
+                for param in missing {
+                    let mut chosen_value = None;
+                    
+                    if let Some(ref fetch_cmd_args) = param.candidate_fetch_command {
+                        if !fetch_cmd_args.is_empty() {
+                            println!("{}", format!("Fetching candidates for {}...", param.name).cyan());
+                            
+                            if let Ok(out) = std::process::Command::new("aws")
+                                .args(fetch_cmd_args)
+                                .env("AWS_PROFILE", &aws_context.profile)
+                                .env("AWS_REGION", &aws_context.region)
+                                .output()
+                            {
+                                if out.status.success() {
+                                    if let Ok(text) = String::from_utf8(out.stdout) {
+                                        let mut options: Vec<String> = text.split_whitespace().map(|s| s.to_string()).collect();
+                                        if !options.is_empty() {
+                                            options.insert(0, "[ Enter manually... ]".to_string());
+                                            
+                                            if let Ok(idx) = dialoguer::FuzzySelect::with_theme(&dialoguer::theme::ColorfulTheme::default())
+                                                .with_prompt(format!("{} ({})", param.name.cyan().bold(), param.description))
+                                                .default(0)
+                                                .items(&options)
+                                                .interact()
+                                            {
+                                                if idx != 0 {
+                                                    chosen_value = Some(options[idx].clone());
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    let input = if let Some(val) = chosen_value {
+                        val
+                    } else {
+                        dialoguer::Input::<String>::new()
+                            .with_prompt(format!("{} ({})", param.name.cyan(), param.description))
+                            .interact_text()
+                            .expect("Failed to read input")
+                    };
+
+                    added_info.push_str(&format!("- {}: {}\n", param.name, input));
+                }
+                current_prompt.push_str("\n\nUser provided the following missing information:\n");
+                current_prompt.push_str(&added_info);
             }
-            current_prompt.push_str("\n\nUser provided the following missing information:\n");
-            current_prompt.push_str(&added_info);
         }
 
         if !missing_found {
@@ -120,8 +187,7 @@ async fn main() -> anyhow::Result<()> {
                 match generate_plan_interactively(
                     &planner,
                     &prompt_text,
-                    &aws_context.profile,
-                    &aws_context.region,
+                    &mut aws_context,
                 )
                 .await
                 {
@@ -177,8 +243,7 @@ async fn main() -> anyhow::Result<()> {
                 match generate_plan_interactively(
                     &planner,
                     &prompt_text,
-                    &aws_context.profile,
-                    &aws_context.region,
+                    &mut aws_context,
                 )
                 .await
                 {

@@ -29,12 +29,15 @@ pub struct Executor;
 
 impl Executor {
     pub fn run(plan: &Plan, profile: &str, region: &str) -> Result<Option<i32>> {
-        let full_cmd = plan.aws_cli_args.join(" ");
-        let mut actual_args = shell_words::split(&full_cmd)
-            .unwrap_or_else(|_| plan.aws_cli_args.clone());
+        let mut actual_args = plan.aws_cli_args.clone();
 
         if actual_args.first().map(|s| s.as_str()) == Some("aws") {
             actual_args.remove(0);
+        }
+        
+        // Fallback: If LLM generated a single flat string despite prompt warnings, safely split it.
+        if actual_args.len() == 1 && actual_args[0].contains(" ") {
+            actual_args = shell_words::split(&actual_args[0]).unwrap_or(actual_args);
         }
 
         let mut cmd = Command::new("aws");

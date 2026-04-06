@@ -27,12 +27,13 @@ pub fn print_plan(plan: &Plan) {
 
     println!("\n{}:", "Command".bold());
     
-    let full_cmd = plan.aws_cli_args.join(" ");
-    let mut actual_args = shell_words::split(&full_cmd)
-        .unwrap_or_else(|_| plan.aws_cli_args.clone());
-
-    if actual_args.first().map(String::as_str) == Some("aws") {
+    let mut actual_args = plan.aws_cli_args.clone();
+    if actual_args.first().map(|s| s.as_str()) == Some("aws") {
         actual_args.remove(0);
+    }
+
+    if actual_args.len() == 1 && actual_args[0].contains(" ") {
+        actual_args = shell_words::split(&actual_args[0]).unwrap_or(actual_args);
     }
 
     let mut args_clone = vec!["aws".to_string()];
