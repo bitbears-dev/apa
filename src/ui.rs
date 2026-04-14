@@ -26,7 +26,7 @@ pub fn print_plan(plan: &Plan) {
     }
 
     println!("\n{}:", "Command".bold());
-    
+
     let mut actual_args = plan.aws_cli_args.clone();
     if actual_args.first().map(|s| s.as_str()) == Some("aws") {
         actual_args.remove(0);
@@ -38,7 +38,7 @@ pub fn print_plan(plan: &Plan) {
 
     let mut args_clone = vec!["aws".to_string()];
     args_clone.extend(actual_args);
-    
+
     println!("  {}", shell_words::join(args_clone).bright_white());
 
     if !plan.assumptions.is_empty() {

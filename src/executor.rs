@@ -34,22 +34,39 @@ impl Executor {
         if actual_args.first().map(|s| s.as_str()) == Some("aws") {
             actual_args.remove(0);
         }
-        
+
         // Fallback: If LLM generated a single flat string despite prompt warnings, safely split it.
         if actual_args.len() == 1 && actual_args[0].contains(" ") {
             actual_args = shell_words::split(&actual_args[0]).unwrap_or(actual_args);
         }
 
+        if !actual_args.contains(&"--profile".to_string()) && !profile.is_empty() {
+            actual_args.push("--profile".to_string());
+            actual_args.push(profile.to_string());
+        }
+
+        if !actual_args.contains(&"--region".to_string()) && !region.is_empty() {
+            actual_args.push("--region".to_string());
+            actual_args.push(region.to_string());
+        }
+
         let mut cmd = Command::new("aws");
         cmd.args(&actual_args);
-
-        cmd.env("AWS_PROFILE", profile);
-        cmd.env("AWS_REGION", region);
 
         cmd.stdout(Stdio::inherit());
         cmd.stderr(Stdio::inherit());
 
-        println!("{}", format!("Executing: aws {} (with AWS_PROFILE={} AWS_REGION={})", shell_words::join(actual_args).as_str(), profile, region).cyan());
+        let actual_command = format!("aws {}", shell_words::join(actual_args.clone()));
+        println!("{}", format!("Executing: {}", actual_command).cyan());
+
+        let shell_hist_res = crate::history::append_to_shell_history(&actual_command);
+        if let Err(e) = shell_hist_res {
+            eprintln!(
+                "{}",
+                format!("Warning: Failed to append to shell history: {}", e).yellow()
+            );
+        }
+
         let mut child = cmd.spawn()?;
         let status = child.wait()?;
 
